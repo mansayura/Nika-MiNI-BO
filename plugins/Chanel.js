@@ -32,7 +32,7 @@ cmd({
       return reply(`❌ File is too large (${sizeInMB.toFixed(2)}MB). WhatsApp max: 500MB.`);
     }
 
-    const caption = `🎞️ *${fileName}*\n\n❖ Video Quality : 720p\n\n📥 Video එක Full Download කිරිමෙන් අනතුරුව බලන්න\n\n🚨 වැඩ නැති එකක් උනොත් මේ number එකට message එකක් දාන්න: 0743826406\n\n> *ᴜᴘʟᴏᴀᴅ ʙʏ GOJO MD*`;
+    const caption = `🎞️ *${fileName}*\n\n❖ Video Quality : 720p\n\n📥 Video එක Full Download කිරිමෙන් අනතුරුව බලන්න\n\n🚨 වැඩ නැති එකක් උනොත් මේ number එකට message එකක් දාන්න: 0743826406\n\n> *ᴜᴘʟᴏᴀᴅ ʙʏ NIKA MINI*`;
 
     if (ext === ".mp4") {
       await conn.sendMessage(from, {

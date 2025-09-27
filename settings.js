@@ -8,7 +8,7 @@ function convertToBool(text, fault = 'true') {
 module.exports = {
     // ───── WhatsApp Bot Config ─────
     SESSION_ID: process.env.SESSION_ID === undefined 
-        ? '𝐍𝐈𝐊𝐀 𝐌𝐈𝐍𝐈 𝐌𝐃=HJRizApR#dm38lpkptr2z8-MH4gs6f48i0cP9IfUHQO3yVAwBX2I' 
+        ? '𝐍𝐈𝐊𝐀 𝐌𝐈𝐍𝐈 𝐌𝐃=TVoVQAja#b2_o3SGKuJVWuyXSLfjaR57WI5vqJM4O1QKFXpgtZTA' 
         : process.env.SESSION_ID,
 
     OWNER_NUMBER: process.env.OWNER_NUMBER === undefined 
@@ -34,5 +34,5 @@ module.exports = {
     // ───── Telegram Config ─────
     API_ID: process.env.API_ID || 23094011,
     API_HASH: process.env.API_HASH || "1823daf9ac2ab64b1008b36b322daac9",
-    TG_GROUP: process.env.TG_GROUP || "@SriCineMax",
+    TG_GROUP: process.env.TG_GROUP || "@MyBotSL",
 };

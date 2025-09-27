@@ -27,7 +27,7 @@ cmd({
 ➤ .download
 ➤ .gdrive
 ➤ .telegram < name >
-("@SriCineMax" group document)
+("telegram any" group document)
 ➤ .fb
 ➤ .tiktok
 ➤ .mega

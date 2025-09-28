@@ -1,37 +1,42 @@
 const { cmd } = require('../lib/command');
 const ytdl = require('ytdl-core');
-const yts = require('youtube-yts'); // search support
+const fetch = require('node-fetch');
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
 const path = require('path');
+
+async function searchYouTube(query) {
+    const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+    const res = await fetch(url);
+    const text = await res.text();
+
+    // Extract videoId using regex
+    const match = text.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+    if (!match) throw new Error('No video found for your query.');
+    return `https://www.youtube.com/watch?v=${match[1]}`;
+}
 
 cmd({
     pattern: "song",
     category: "downloader",
     react: "🎶",
-    desc: "Download YouTube audio as MP3 (URL or search)",
+    desc: "Download YouTube audio as MP3 (URL or search query)",
     filename: __filename
 }, async (conn, mek, m, {from, q, reply}) => {
     try {
         if (!q) return reply('Please provide a YouTube URL or search query.');
 
-        let url, info;
-
-        // Check if input is URL
+        // Determine if input is URL or search query
+        let url;
         if (ytdl.validateURL(q)) {
             url = q;
-            info = await ytdl.getInfo(url);
         } else {
-            // Search first result
-            const searchResults = await yts.search(q);
-            if (!searchResults || !searchResults.items.length) return reply('No results found.');
-            url = searchResults.items[0].url;
-            info = await ytdl.getInfo(url);
+            url = await searchYouTube(q);
         }
 
+        const info = await ytdl.getInfo(url);
         const title = info.videoDetails.title.replace(/[\\/:*?"<>|]/g, '');
         const thumbnail = info.videoDetails.thumbnails.slice(-1)[0].url;
-
         const tmpPath = path.join(__dirname, `${Date.now()}.mp3`);
 
         // Send thumbnail + info

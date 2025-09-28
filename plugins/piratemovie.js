@@ -2,8 +2,9 @@ const { cmd } = require('../lib/command');
 const axios = require('axios');
 const NodeCache = require('node-cache');
 
-// Initialize cache (5-minute TTL)
+// Initialize caches (5-minute TTL)
 const searchCache = new NodeCache({ stdTTL: 300, checkperiod: 120 });
+const infoCache = new NodeCache({ stdTTL: 300, checkperiod: 120 });
 
 // Axios instance with timeout
 const axiosInstance = axios.create({
@@ -11,169 +12,236 @@ const axiosInstance = axios.create({
 });
 
 const theme = {
-  header: `*NIKA MD PIRATE MOVIE DOWNLOADER* \n\n`,
-  footer: `>𝐩𝐨𝐰𝐞𝐫𝐝 𝐛𝐲 𝐧𝐢𝐤𝐚 𝐦𝐢𝐧𝐢 𝐛𝐨𝐭`,
+  header: `*SULA MD TV SERIES DOWNLOADER* \n\n`,
+  footer: `> 𝐏𝙾𝚆𝙴𝚁𝙳 𝐁𝚈 𝐒𝚄𝙻𝙰 𝐌𝙳`,
   emojis: {
     search: "🔍",
-    movie: "🎬",
+    series: "📺",
+    episode: "🎞️",
     uploading: "📤",
     success: "✅",
     error: "❌",
-    info: "ℹ️"
+    info: "ℹ️",
+    quality: "📊",
+    size: "💾",
+    link: "🔗"
   }
 };
 
 cmd({
-  pattern: 'pirate',
-  desc: 'Search & download Pirate Movie Sinhala Sub',
+  pattern: 'tvshow',
+  desc: 'Download episodes from Sinhala Sub TV show API',
+  react: '🔍',
   category: 'movie',
-  use: '.pirate Avengers',
-  filename: __filename
-}, async (conn, mek, m, { args, from, reply }) => {
+  filename: __filename,
+}, async (conn, mek, m, { from, q }) => {
   try {
-    const query = args.join(' ');
-    if (!query) {
-      await reply(`${theme.header}${theme.emojis.info} Search keyword දාන්න.\n\nUse: .pirate movie name\n${theme.footer}`);
+    if (!q) {
+      await conn.sendMessage(from, {
+        text: `${theme.header}${theme.emojis.info} Please provide a series name\nExample: .tvshow The Originals\n${theme.footer}`,
+      }, { quoted: mek });
       return;
     }
 
     await conn.sendMessage(from, { react: { text: theme.emojis.search, key: mek.key } });
 
-    // Search API
-    const searchUrl = `https://pirate-movie-sula.vercel.app/api/pirate/search?q=${encodeURIComponent(query)}`;
-    const res = await axiosInstance.get(searchUrl);
-    const results = res.data?.results;
-
-    if (!results || !Array.isArray(results) || results.length === 0) {
-      await reply(`${theme.header}${theme.emojis.error} No movies found for "${query}".\n${theme.footer}`);
-      return;
+    // Step 1: Search for series
+    const cacheKey = `search_${q.toLowerCase()}`;
+    let searchData = searchCache.get(cacheKey);
+    if (!searchData) {
+      const resp = await axiosInstance.get(`https://sula-sinhalasub-tvshow.vercel.app/api/sinhalasub-tvshow/search?q=${encodeURIComponent(q)}`);
+      searchData = resp.data.results;
+      if (!Array.isArray(searchData) || !searchData.length) {
+        throw new Error('No series found');
+      }
+      searchCache.set(cacheKey, searchData);
     }
 
-    // Cache results
-    const cacheKey = `pirate_${from}_${Date.now()}`;
-    searchCache.set(cacheKey, results);
-
-    // Format movie list
-    let msg = `${theme.header}${theme.emojis.movie} Found ${results.length} movies for "${query}":\n\n`;
-    const movies = results.map((movie, i) => ({
+    // Step 2: Format series list
+    let seriesMessage = `${theme.header}${theme.emojis.series} Found ${searchData.length} series for "${q}":\n\n`;
+    const seriesList = searchData.map((s, i) => ({
       number: i + 1,
-      title: movie.title,
-      year: movie.year || 'N/A',
-      url: movie.url
+      title: s.Title,
+      link: s.Link
     }));
 
-    movies.forEach(movie => {
-      msg += `${theme.emojis.movie} *${movie.number}.* ${movie.title} (${movie.year})\n`;
+    seriesList.forEach(s => {
+      seriesMessage += `${theme.emojis.series} *${s.number}.* ${s.title}\n`;
     });
-    msg += `\n${theme.emojis.info} Reply with the number to download\n${theme.emojis.info} Reply 'done' to stop\n${theme.footer}`;
+    seriesMessage += `\n${theme.emojis.info} Reply with the number to select a series\n${theme.emojis.info} Reply 'done' to stop\n${theme.footer}`;
 
-    await conn.sendMessage(from, { react: { text: theme.emojis.movie, key: mek.key } });
+    await conn.sendMessage(from, { react: { text: theme.emojis.series, key: mek.key } });
 
-    // Send movie list message
-    const movieListMessage = await conn.sendMessage(from, { text: msg }, { quoted: mek });
-    const movieListMessageKey = movieListMessage.key;
+    // Send series list message
+    const seriesListMessage = await conn.sendMessage(from, { text: seriesMessage }, { quoted: mek });
+    const seriesListMessageKey = seriesListMessage.key;
 
-    // Track selections with a Map
     const selectionMap = new Map();
 
-    // Handle movie selection with a single listener
+    // Selection handler
     const selectionHandler = async (update) => {
       try {
         const message = update.messages[0];
-        if (!message.message || message.key.fromMe || message.key.remoteJid !== from || message.key.participant !== m.sender) return;
+        if (!message.message || message.key.fromMe || message.key.remoteJid !== from) return;
 
-        // Get reply text
         const replyText = message.message.conversation ||
                          (message.message.extendedTextMessage && message.message.extendedTextMessage.text) || '';
         if (!replyText) return;
 
-        // Exit condition
         if (replyText.trim().toLowerCase() === 'done') {
           conn.ev.off('messages.upsert', selectionHandler);
           selectionMap.clear();
-          searchCache.del(cacheKey);
           await conn.sendMessage(from, {
-            text: `${theme.header}${theme.emojis.info} Movie search ended.\nThank you for using SULA MD!\n${theme.footer}`,
+            text: `${theme.header}${theme.emojis.info} Series search ended.\nThank you for using SULA MD!\n${theme.footer}`,
           }, { quoted: message });
           return;
         }
 
-        // Check if this is a reply to the movie list
         const contextInfo = message.message.extendedTextMessage && message.message.extendedTextMessage.contextInfo;
         const repliedToId = contextInfo && contextInfo.stanzaId ? contextInfo.stanzaId : null;
-        if (!repliedToId || repliedToId !== movieListMessageKey.id) return;
 
-        // Movie selection
-        const selectedNumber = parseInt(replyText.trim());
-        const selectedMovie = movies.find(movie => movie.number === selectedNumber);
+        // SERIES selection
+        if (repliedToId === seriesListMessageKey.id) {
+          const selectedNumber = parseInt(replyText.trim());
+          const selectedSeries = seriesList.find(s => s.number === selectedNumber);
 
-        if (!selectedMovie) {
-          await conn.sendMessage(from, {
-            text: `${theme.header}${theme.emojis.error} Invalid selection.\nPlease reply with a valid movie number.\n${theme.footer}`,
-          }, { quoted: message });
-          return;
-        }
-
-        await conn.sendMessage(from, { react: { text: theme.emojis.uploading, key: message.key } });
-
-        // Get download link
-        let downloadLink;
-        try {
-          const dlUrl = `https://pirate-movie-sula.vercel.app/api/pirate/dl?url=${encodeURIComponent(selectedMovie.url)}`;
-          const dlRes = await axiosInstance.get(dlUrl);
-          downloadLink = dlRes.data?.download;
-          if (!downloadLink) {
-            throw new Error('Download link not found');
+          if (!selectedSeries) {
+            await conn.sendMessage(from, {
+              text: `${theme.header}${theme.emojis.error} Invalid selection.\nPlease reply with a valid series number.\n${theme.footer}`,
+            }, { quoted: message });
+            return;
           }
-        } catch (err) {
-          await conn.sendMessage(from, {
-            text: `${theme.header}${theme.emojis.error} Failed to fetch download link: ${err.message}\nPlease try another movie.\n${theme.footer}`,
-          }, { quoted: message });
-          await conn.sendMessage(from, { react: { text: theme.emojis.error, key: message.key } });
-          return;
+
+          await conn.sendMessage(from, { react: { text: theme.emojis.search, key: message.key } });
+
+          // Fetch episode info
+          const infoKey = `info_${selectedSeries.link}`;
+          let infoData = infoCache.get(infoKey);
+          if (!infoData) {
+            const inf = await axiosInstance.get(`https://sula-sinhalasub-tvshow.vercel.app/api/sinhalasub-tvshow/info?url=${encodeURIComponent(selectedSeries.link)}`);
+            infoData = inf.data.results;
+            if (!infoData || !Array.isArray(infoData.episodes) || !infoData.episodes.length) {
+              await conn.sendMessage(from, {
+                text: `${theme.header}${theme.emojis.error} No episodes found for this series.\nPlease try another series.\n${theme.footer}`,
+              }, { quoted: message });
+              await conn.sendMessage(from, { react: { text: theme.emojis.error, key: message.key } });
+              return;
+            }
+            infoCache.set(infoKey, infoData);
+          }
+
+          // Episode list
+          let epText = `${theme.header}${theme.emojis.series} Episodes for: ${selectedSeries.title}\n\n`;
+          const episodes = infoData.episodes.map((ep, i) => ({
+            number: i + 1,
+            title: ep.title,
+            date: ep.date,
+            link: ep.episode_link,
+            quality: ep.quality,
+            size: ep.size
+          }));
+
+          episodes.forEach(ep => {
+            epText += `${theme.emojis.episode} *${ep.number}.* ${ep.title} (${ep.date})\n`;
+          });
+          epText += `\n${theme.emojis.info} Reply with the episode number to download\n${theme.emojis.info} Reply 'done' to stop\n${theme.footer}`;
+
+          await conn.sendMessage(from, { react: { text: theme.emojis.episode, key: message.key } });
+
+          const epListMessage = await conn.sendMessage(from, { text: epText }, { quoted: message });
+
+          selectionMap.set(epListMessage.key.id, { series: selectedSeries, episodes });
         }
+        // EPISODE selection
+        else if (selectionMap.has(repliedToId)) {
+          const { series, episodes } = selectionMap.get(repliedToId);
+          const selectedEpNumber = parseInt(replyText.trim());
+          const chosenEp = episodes.find(ep => ep.number === selectedEpNumber);
 
-        // Send as document/video
-        try {
-          await conn.sendMessage(from, {
-            document: { url: downloadLink },
-            mimetype: 'video/mp4',
-            fileName: `${selectedMovie.title}.mp4`,
-            caption: `${theme.header}${theme.emojis.movie} ${selectedMovie.title}\n${theme.emojis.year} Year: ${selectedMovie.year}\n${theme.footer}`
-          }, { quoted: message });
+          if (!chosenEp) {
+            await conn.sendMessage(from, {
+              text: `${theme.header}${theme.emojis.error} Invalid episode number.\nPlease reply with a valid episode number.\n${theme.footer}`,
+            }, { quoted: message });
+            return;
+          }
 
-          await conn.sendMessage(from, { react: { text: theme.emojis.success, key: message.key } });
-        } catch (err) {
-          await conn.sendMessage(from, {
-            text: `${theme.header}${theme.emojis.error} Error sending movie: ${err.message}\nDirect Download Link: ${downloadLink}\n${theme.footer}`,
-          }, { quoted: message });
-          await conn.sendMessage(from, { react: { text: theme.emojis.error, key: message.key } });
-          return;
+          await conn.sendMessage(from, { react: { text: theme.emojis.uploading, key: message.key } });
+
+          // Download link fetch - FIXED .find() issue
+          let finalUrl;
+          try {
+            const dl = await axiosInstance.get(`https://movie-api-nine-pi.vercel.app/api/sinhalasubs/download?url=${encodeURIComponent(chosenEp.link)}&apikey=test2`);
+            const dlData = dl.data;
+
+            if (Array.isArray(dlData)) {
+              finalUrl = dlData[0]?.direct?.url || dlData.find(it => it.gdrive)?.gdrive?.url;
+            } else if (dlData && typeof dlData === 'object') {
+              finalUrl = dlData.direct?.url || dlData.gdrive?.url;
+            }
+
+            if (!finalUrl) throw new Error('No valid download links found');
+          } catch (err) {
+            await conn.sendMessage(from, {
+              text: `${theme.header}${theme.emojis.error} Failed to fetch download link: ${err.message}\nPlease try another episode.\n${theme.footer}`,
+            }, { quoted: message });
+            await conn.sendMessage(from, { react: { text: theme.emojis.error, key: message.key } });
+            return;
+          }
+
+          // File size check
+          let sizeVal = (chosenEp.size || '').toLowerCase();
+          const sizeNum = sizeVal.includes('gb')
+            ? (parseFloat(sizeVal) || 0) * 1024
+            : parseFloat(sizeVal) || 0;
+          const isLarge = sizeNum > 1900;
+
+          const caption = `${theme.header}${theme.emojis.series} ${series.title}\n${theme.emojis.episode} ${chosenEp.title}\n${theme.emojis.quality} Quality: ${chosenEp.quality}\n${theme.emojis.size} Size: ${chosenEp.size}\n${theme.footer}`;
+
+          if (isLarge) {
+            await conn.sendMessage(from, {
+              text: `${theme.header}${theme.emojis.info} File too large to upload (${chosenEp.size})\n${theme.emojis.link} Direct Download Link: ${finalUrl}\n${theme.footer}`,
+            }, { quoted: message });
+            await conn.sendMessage(from, { react: { text: theme.emojis.success, key: message.key } });
+            conn.ev.off('messages.upsert', selectionHandler);
+            selectionMap.clear();
+            return;
+          }
+
+          try {
+            await conn.sendMessage(from, {
+              document: { url: finalUrl },
+              mimetype: 'video/mp4',
+              fileName: `${series.title}_${chosenEp.quality}.mp4`,
+              caption
+            }, { quoted: message });
+
+            await conn.sendMessage(from, { react: { text: theme.emojis.success, key: message.key } });
+            conn.ev.off('messages.upsert', selectionHandler);
+            selectionMap.clear();
+          } catch (err) {
+            await conn.sendMessage(from, {
+              text: `${theme.header}${theme.emojis.error} Error sending episode: ${err.message}\n${theme.emojis.link} Direct Download Link: ${finalUrl}\n${theme.footer}`,
+            }, { quoted: message });
+            await conn.sendMessage(from, { react: { text: theme.emojis.error, key: message.key } });
+          }
         }
-
-        // Clear session after successful download
-        conn.ev.off('messages.upsert', selectionHandler);
-        selectionMap.clear();
-        searchCache.del(cacheKey);
-
       } catch (err) {
         console.error('Error in selectionHandler:', err);
       }
     };
 
-    // Register the listener
     conn.ev.on('messages.upsert', selectionHandler);
 
-    // Set a timeout to clear the handler after 10 minutes
     setTimeout(() => {
       conn.ev.off('messages.upsert', selectionHandler);
       selectionMap.clear();
-      searchCache.del(cacheKey);
-    }, 10 * 60 * 1000);
+    }, 20 * 60 * 1000); // 20 min
 
   } catch (err) {
-    console.error('Error in pirate command:', err);
-    await reply(`${theme.header}${theme.emojis.error} Error: ${err.message}\nPlease try again later.\n${theme.footer}`);
+    console.error('Error in tvshow command:', err);
+    await conn.sendMessage(from, {
+      text: `${theme.header}${theme.emojis.error} Error: ${err.message}\nPlease try again later.\n${theme.footer}`,
+    }, { quoted: mek });
     await conn.sendMessage(from, { react: { text: theme.emojis.error, key: mek.key } });
   }
 });

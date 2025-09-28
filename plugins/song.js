@@ -1,84 +1,124 @@
-const { cmd } = require('../lib/command');
-const ytdl = require('ytdl-core');
-const fetch = require('node-fetch');
-const ffmpeg = require('fluent-ffmpeg');
-const fs = require('fs');
-const path = require('path');
-
-async function searchYouTube(query) {
-    const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
-    const res = await fetch(url);
-    const text = await res.text();
-
-    // Extract videoId using regex
-    const match = text.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
-    if (!match) throw new Error('No video found for your query.');
-    return `https://www.youtube.com/watch?v=${match[1]}`;
-}
+const { cmd, commands } = require('../lib/command');
+const axios = require("axios");
+const yts = require("yt-search"); 
 
 cmd({
     pattern: "song",
-    category: "downloader",
-    react: "🎶",
-    desc: "Download YouTube audio as MP3 (URL or search query)",
+    alias: ["play"],
+    desc: "Download songs from YouTube.",
+    react: "🎵",
+    category: "download",
     filename: __filename
-}, async (conn, mek, m, {from, q, reply}) => {
+}, async (conn, mek, m, { from, args, q, reply }) => {
     try {
-        if (!q) return reply('Please provide a YouTube URL or search query.');
+        if (!q) return reply("❌ Please provide a YouTube link or search query!");
 
-        // Determine if input is URL or search query
-        let url;
-        if (ytdl.validateURL(q)) {
-            url = q;
+        let ytUrl;
+        if (q.includes("youtube.com") || q.includes("youtu.be")) {
+            ytUrl = q;
         } else {
-            url = await searchYouTube(q);
+            reply("🔎 Searching YouTube...");
+            const search = await yts(q);
+            if (!search.videos || search.videos.length === 0) {
+                return reply("❌ No results found!");
+            }
+            ytUrl = search.videos[0].url;
         }
 
-        const info = await ytdl.getInfo(url);
-        const title = info.videoDetails.title.replace(/[\\/:*?"<>|]/g, '');
-        const thumbnail = info.videoDetails.thumbnails.slice(-1)[0].url;
-        const tmpPath = path.join(__dirname, `${Date.now()}.mp3`);
+        reply("⏳ Fetching song...");
 
-        // Send thumbnail + info
-        const infoMessage = `
-🎶 𝐍𝐈𝐊𝐀 𝐌𝐈𝐍𝐈 𝐘𝐓 𝐀𝐔𝐃𝐈𝐎 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 📥
+        const apiBase = "https://www.laksidunimsara.com/song";
+        const apiKey = "Lk8*Vf3!sA1pZ6Hd"; // api key එක බන්
+        const apiUrl = `${apiBase}?url=${encodeURIComponent(ytUrl)}&api_key=${encodeURIComponent(apiKey)}`;
 
-╭━━━━━━━━━●●►
-┢❑ 𝐓𝐢𝐭𝐥𝐞: ${info.videoDetails.title}
-┢❑ 𝐀𝐮𝐭𝐡𝐨𝐫: ${info.videoDetails.author.name}
-┢❑ 𝐃𝐮𝐫𝐚𝐭𝐢𝐨𝐧: ${info.videoDetails.lengthSeconds}s
-╰━━━━━━━━●●►
-        `;
-        await conn.sendMessage(from, { image: { url: thumbnail }, caption: infoMessage });
+        let response;
+        try {
+            response = await axios.get(apiUrl);
+        } catch (err) {
+            console.error("🚨 API request failed:", err);
+            return reply("❌ Failed to contact song API.");
+        }
 
-        // Download + convert to MP3
-        const stream = ytdl(url, { filter: 'audioonly', quality: 'highestaudio' });
+        if (!response.data || response.data.status !== "success") {
+            console.log("API RESPONSE:", response.data);
+            return reply("❌ API did not return a valid response.");
+        }
 
-        await new Promise((resolve, reject) => {
-            ffmpeg(stream)
-                .audioBitrate(128)
-                .toFormat('mp3')
-                .save(tmpPath)
-                .on('end', resolve)
-                .on('error', reject);
+        const video = response.data.video;
+        const downloadUrl = response.data.download;
+
+        let desc = `
+╔═════✦⭒❖⭒✦═════╗
+  🎶 *𝐒𝐎𝐍𝐆 𝐃𝐎𝐖𝐍𝐋𝐎𝐃𝐄* 🎶
+╚═════✦⭒❖⭒✦═════╝
+
+➤ 🎧 *Title:* ${video.title}
+➤ ⏱️ *Duration:* ${video.duration}
+➤ 📅 *Uploaded:* ${video.author}
+
+╔═════✦⭒❖⭒✦═════╗
+   ⬇️ *DOWNLOAD OPTIONS* ⬇️
+╚═════✦⭒❖⭒✦═════╝
+
+│ ① 🎵 *Audio*          
+│ ② 📄 *Document*       
+│ ③ 🎙️ *Voice Note*     
+
+Reply number 1️⃣2️⃣⬆️
+
+> POWERD BY*NIKA MINI 🌐*
+`;
+
+        const sentMsg = await conn.sendMessage(from, {
+            image: { url: video.thumbnail },
+            caption: desc
+        }, { quoted: mek });
+
+        const messageID = sentMsg.key.id;
+
+        conn.ev.on('messages.upsert', async (messageUpdate) => {
+            const mek2 = messageUpdate.messages[0];
+            if (!mek2.message) return;
+
+            const textMsg = mek2.message.conversation || mek2.message.extendedTextMessage?.text;
+            const fromReply = mek2.key.remoteJid;
+
+            const isReplyToSentMsg = mek2.message.extendedTextMessage &&
+                mek2.message.extendedTextMessage.contextInfo?.stanzaId === messageID;
+            if (!isReplyToSentMsg) return;
+
+            if (["1", "2", "3"].includes(textMsg)) {
+                await conn.sendMessage(fromReply, { react: { text: '⬇️', key: mek2.key } });
+
+                if (textMsg === "1") { 
+                    await conn.sendMessage(fromReply, {
+                        audio: { url: downloadUrl },
+                        mimetype: "audio/mpeg",
+                        ptt: false
+                    }, { quoted: mek2 });
+
+                } else if (textMsg === "2") { 
+                    await conn.sendMessage(fromReply, {
+                        document: { url: downloadUrl },
+                        mimetype: "audio/mpeg",
+                        fileName: `${video.title}.mp3`,
+                        caption: `🎵 Downloaded 𝐒ᴜʟᴀ....!"🫟`
+                    }, { quoted: mek2 });
+
+                } else if (textMsg === "3") { 
+                    await conn.sendMessage(fromReply, {
+                        audio: { url: downloadUrl },
+                        mimetype: "audio/mpeg",
+                        ptt: true
+                    }, { quoted: mek2 });
+                }
+
+                await conn.sendMessage(fromReply, { react: { text: '⬆️', key: mek2.key } });
+            }
         });
-
-        // Send MP3 document
-        await conn.sendMessage(from, {
-            document: { url: 'file://' + tmpPath },
-            mimetype: 'audio/mp3',
-            fileName: `${title}.mp3`,
-            caption: `🎵 ${info.videoDetails.title}`
-        });
-
-        // React ✅
-        await conn.sendMessage(from, { react: { text: '✅', key: mek.key } });
-
-        // Delete temp file
-        fs.unlinkSync(tmpPath);
 
     } catch (e) {
-        console.error(e);
-        await reply(`📕 An error occurred: ${e.message}`);
+        console.log("🚨 ERROR DETAILS:", e);  //ටහුකන්න ගස් මෝල් ගොන් කැරියා
+        reply("❌ An error occurred while processing your request.");
     }
 });

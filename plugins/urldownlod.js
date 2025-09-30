@@ -1,6 +1,7 @@
 const { cmd } = require('../lib/command');
 const axios = require("axios");
 const path = require("path");
+const mime = require("mime-types"); // << install with: npm install mime-types
 
 cmd({
     pattern: "download",
@@ -40,13 +41,16 @@ async (conn, mek, m, { from, q, reply }) => {
             fileName = path.basename(link.split("?")[0]) || "downloaded_file";
         }
 
+        // 📝 Detect mimetype properly
+        let mimetype = mime.lookup(fileName) || "application/octet-stream";
+
         // 📝 Info message
         let info = `*© ᴄʀᴇᴀᴛᴇᴅ ʙʏ ꜱayura mihiranga*`;
 
-        // 📥 Send file with real name
+        // 📥 Send file with real name + correct mimetype
         await conn.sendMessage(from, {
             document: { url: link },
-            mimetype: "application/octet-stream", // auto detects type
+            mimetype: mimetype,
             fileName: fileName,
             caption: info
         }, { quoted: mek });

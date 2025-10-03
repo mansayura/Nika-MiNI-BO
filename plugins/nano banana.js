@@ -1,7 +1,7 @@
 // • Feature : Nanobanana
 // • Credits : https://whatsapp.com/channel/0029Vb4fjWE1yT25R7epR110
 
-import uploadImage from '../command/lib/uploadImage.js';
+import uploadImage from '../lib/uploadImage.js';
 import fetch from 'node-fetch';
 
 let handler = async (m, { conn, text, usedPrefix, command }) => {
